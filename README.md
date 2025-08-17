@@ -10,9 +10,9 @@ Proyek ini bertujuan untuk menganalisis data pada E-Commerce Dataset. Tujuan akh
 Dengan beberapa pertanyaan analisis yaitu:
 - Kategori Produk apa yang memiliki review terbaik dan terburuk?
 - Kategori Produk apa yang memiliki penjualan tertinggi dalam periode tertentu?
-- Total Revenue yang didapatkan?
+- Berapa Total Revenue yang didapatkan?
 - Berapa banyak produk yang terjual?
-- Total Order yang terjadi?
+- Berapa Total Order yang terjadi?
 
 
 ## Struktur Direktori
