@@ -8,7 +8,6 @@ import streamlit as st
 import altair as alt
 from babel.numbers import format_currency
 
-alt.theme.enable("dark")
 st.set_page_config(layout="wide")
 
 
