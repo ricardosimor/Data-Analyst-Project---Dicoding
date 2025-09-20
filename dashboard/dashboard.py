@@ -1,15 +1,30 @@
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib.patheffects as pe
+import matplotlib.dates as mdates
+import matplotlib.ticker as mticker
 import seaborn as sns
 import streamlit as st
+import altair as alt
 from babel.numbers import format_currency
 
-sns.set(style='dark')
+alt.theme.enable("dark")
+st.set_page_config(layout="wide")
 
 
-# Helper Function
-def total_revenue_df(df):
-    total_revenue = df.groupby(by='product_category_name').agg({
+# LOAD DATA
+ecommerce_df = pd.read_csv("ecommerce.csv", delimiter=",")
+datetime_columns = ["purchase_time"]
+ecommerce_df.sort_values(by="purchase_time", inplace=True)
+ecommerce_df.reset_index(inplace=True)
+
+
+# HELPER FUNCTION
+
+# KEY METRICS
+# 1.Total Revenue
+def make_total_revenue(df):
+    total_revenue = df.groupby(by='product_category').agg({
         'price' : 'sum'
     }) 
     total_revenue = total_revenue.reset_index()
@@ -17,185 +32,286 @@ def total_revenue_df(df):
     }, inplace = True)
     return total_revenue
 
-def product_sold_df(df):
-    product_sold = df[df['order_status'] == 'delivered'].groupby(by='product_category_name').agg({
-        'order_id':'nunique'
-    }) 
-    product_sold = product_sold.reset_index()
+# 2. Total Produk Yang Terjual
+def make_product_sold(df):
+    product_sold = df[df['order_status'].isin(['shipped', 'delivered'])] \
+                    .groupby('product_category') \
+                    .agg({'order_id': 'nunique'}) \
+                    .reset_index()
     product_sold.rename(columns = {'order_id' : 'total'
     }, inplace = True)
     return product_sold
 
-def total_orders_df(df):
-    total_orders = df.groupby(by='product_category_name').agg({
-        'order_id' : 'nunique'
+# 3. Total Transaksi
+def make_total_orders(df):
+    total_orders = df.groupby(by='product_category').agg({
+        'order_id' : 'count'
     }) 
     total_orders = total_orders.reset_index()
     total_orders.rename(columns = {'order_id' : 'total'
     }, inplace = True)
     return total_orders
 
-def create_bestreviews_df(df):
-    best_reviews = df.groupby(by='product_category_name').agg({
-        'order_id' : "nunique",
-        'review_score' : "mean"
-    }).sort_values(by='review_score', ascending=False)
-    return best_reviews
+def format_number(num):
+    if num >= 1_000_000_000:
+        return f"{num/1_000_000_000:.2f}B"
+    elif num >= 1_000_000:
+        return f"{num/1_000_000:.2f}M"
+    elif num >= 1_000:
+        return f"{num/1_000:.2f}K"
+    else:
+        return str(int(num))
 
 
-def create_worstreviews_df(df):
-    worst_reviews = df.groupby(by='product_category_name').agg({
-        'order_id' : "nunique",
-        'review_score' : "mean"
-    }).sort_values(by='review_score', ascending=True)
-    return worst_reviews
+# TREN TOTAL ORDER 
+def make_monthly_order(df):
+    monthly_orders = df.groupby('order_month').agg(
+        total_delivered = ('order_status', lambda x: (x == 'delivered').sum()),
+        total_canceled = ('order_status', lambda x: (x == 'delivered').sum())
+        ).reset_index()
+    return monthly_orders
 
-def create_high_order_2018_df(df):
-    high_order_2018 = df[df['order_year'] == 2018].groupby(by='product_category_name').agg({
-        'order_id' : 'nunique',
-        'price' : 'sum'
-    }).sort_values(by='order_id', ascending=False)
-    return high_order_2018
 
-def create_rfm_df(df):
-    rfm_df = df.groupby(by = 'customer_id', as_index=False).agg({
-    'order_delivered_customer_date' : 'max',
-    'order_id' : 'nunique',
-    'price' : 'sum'
-    })
-    rfm_df.columns = ['customer_id', 'max_order_timestamp', 'frequency', 'monetary']
-    df['order_delivered_customer_date'] = pd.to_datetime(df['order_delivered_customer_date'])
-    rfm_df['max_order_timestamp'] = pd.to_datetime(rfm_df['max_order_timestamp'])
-    rfm_df['max_order_timestamp'] = rfm_df['max_order_timestamp'].dt.date
-    recent_date = df['order_delivered_customer_date'].max().date()
-    rfm_df = rfm_df[rfm_df['max_order_timestamp'].notna()]
-    rfm_df['recency'] = rfm_df['max_order_timestamp'].apply(lambda x: (recent_date - x).days)
-    rfm_df.drop('max_order_timestamp', axis=1, inplace=True)
-    return rfm_df
+# FUNCTION ANALISIS
+# Kategori Produk Penjualan Tertinggi
+def make_best_product(df):
+    best_product = df.groupby('product_category').agg(
+        {'order_id': 'count'}).sort_values(by='order_id', ascending=False).reset_index().rename(columns={'order_id': 'total_order'})
+    return best_product
 
-#Load Data
-all_orders_df = pd.read_csv("all_orders_df.csv")
+# Early Delivery dan Review Score
+def make_ontimegroup(df):
+    early_delivered = df[(df['order_status'] == 'delivered') & (df['delivery_delay'] <= 0)]
+    ontimegroup = early_delivered.groupby('delivery_delay').agg({
+        'review_score' : 'mean'
+    }).sort_values(by='delivery_delay', ascending=False).reset_index().rename(columns={'delivery_delay' : 'delivery_time'})
+    return ontimegroup
 
-datetime_columns = ["order_delivered_customer_date"]
-all_orders_df.sort_values(by="order_delivered_customer_date", inplace=True)
-all_orders_df.reset_index(inplace=True)
+# Delivery Delay dan Review Score
+def make_lategroup(df):
+    delivered_delay = df[(df['order_status'] == 'delivered') & (df['delivery_delay'] >= 0)]
+    late_group = delivered_delay.groupby('delivery_delay').agg({
+        'review_score' : 'mean'
+    }).sort_values(by='delivery_delay', ascending=True).reset_index().rename(columns={'delivery_delay' : 'delivery_time'})
+    return late_group
 
-for column in datetime_columns:
-    all_orders_df[column] = pd.to_datetime(all_orders_df[column])
+# Metode Pembayaran terbanyak digunakan
+def make_mostpayment(df):
+    most_payment = df.groupby('payment_type').agg({
+        'order_id': 'count'
+        }).sort_values(by='order_id', ascending=False).reset_index().rename(columns={'order_id' : 'total_order'})
+    return most_payment
 
-# Filter Data
-min_date = all_orders_df['order_delivered_customer_date'].min()
-max_date = all_orders_df['order_delivered_customer_date'].max()
+# Product Category Paling Profit
+def make_product_profit(df):
+    product_profit = df.groupby('product_category').agg({
+        'price': 'sum',
+        'freight_cost': 'sum'
+        }).reset_index()
+    product_profit['profit'] = product_profit['price'] - product_profit['freight_cost']
+    product_profit = product_profit.sort_values(by='profit', ascending=False)
+    return product_profit
+
+
+# FILTER DATA
+min_date = ecommerce_df['purchase_time'].min()
+max_date = ecommerce_df['purchase_time'].max()
 
 with st.sidebar:
     st.image('ecommerce.png')
 
-    start_date, end_date = st.date_input(
-        label='Rentang Waktu', min_value = min_date,
-        max_value = max_date,
-        value = [min_date, max_date]
+    start_date = st.date_input(
+        label='Waktu Awal', min_value = min_date,
+        value = min_date
     )
-main_df = all_orders_df[(all_orders_df['order_delivered_customer_date'] >= str(start_date)) &
-                                            (all_orders_df['order_delivered_customer_date'] <= str(end_date))]
+    end_date = st.date_input(
+        label='Waktu Akhir', min_value = max_date,
+        value=max_date
+    )
+main_df = ecommerce_df[
+    (ecommerce_df['purchase_time'] >= str(start_date)) &
+    (ecommerce_df['purchase_time'] <= str(end_date))
+    ]
 
-total_revenue = total_revenue_df(main_df)
-total_orders = total_orders_df(main_df)
-product_sold = product_sold_df(main_df)
-product_bestreviews = create_bestreviews_df(main_df)
-product_worstreviews = create_worstreviews_df(main_df)
-product_highorder = create_high_order_2018_df(main_df)
-rfm_df = create_rfm_df(main_df)
 
-    
-st.header("E-Commerce Dashboard :sparkles:")
 
-st.subheader('Operational Highlights')
-col1, col2, col3 = st.columns(3)
- 
+# INPUT DATA KE FUNCTION
+total_revenue = make_total_revenue(main_df)
+total_product_sold = make_product_sold(main_df)
+total_orders = make_total_orders(main_df)
+tren_monthly = make_monthly_order(main_df)
+product_best= make_best_product(main_df)
+cepat_antar = make_ontimegroup(main_df)
+lambat_antar = make_lategroup(main_df)
+metode_pembayaran = make_mostpayment(main_df)
+profit_product = make_product_profit(main_df)
+
+
+
+
+# DASHBOARD   
+st.header("Brazillian E-Commerce Dashboard :sparkles:")
+
+st.subheader('Overview')
+col1, col2, col3, col4 = st.columns(4)
+
+# Key Metrics Section
 with col1:
     total_revenue_sm = total_revenue['total'].sum()
-    st.metric("Total Revenue", value=total_revenue_sm)
+    st.metric("Total Revenue", value=format_number(total_revenue_sm))
 
 with col2:
-    total_product_sm = product_sold['total'].sum()
-    st.metric("Product Sold", value=total_product_sm)
+    total_product_sm = total_product_sold['total'].sum()
+    st.metric("Total Product Sold", value=format_number(total_product_sm))
 
 with col3:
     total_orders_sm = total_orders['total'].sum()
-    st.metric("Total Orders", value=total_orders_sm)
+    st.metric("Total Orders", value=format_number(total_orders_sm))
 
-st.subheader("Category Product With Best Review & Worst Review")
-fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(35, 15))
-colors = ["#90CAF9", "#D3D3D3", "#D3D3D3", "#D3D3D3", "#D3D3D3"]
-sns.barplot(y="product_category_name", x="review_score", data=product_bestreviews.head(5), palette=colors, ax=ax[0])
-ax[0].set_ylabel(None)
-ax[0].set_xlabel("Score Review", fontsize=30)
-ax[0].set_title("Best Review Category Product", loc="center", fontsize=50)
-ax[0].tick_params(axis='y', labelsize=35)
-ax[0].tick_params(axis='x', labelsize=30)
+with col4:
+    st.markdown(
+        "<div style='text-align:center; font-weight:bold; font-size:20px;'>Metode Pembayaran</div>",
+        unsafe_allow_html=True
+    )
+    metode_pembayaran = metode_pembayaran.reset_index(drop=True)
+    max_order = metode_pembayaran['total_order'].max()
+    metode_pembayaran['Progress'] = metode_pembayaran['total_order']
+    metode_pembayaran['payment_type'] = metode_pembayaran['payment_type'].replace({
+    'credit_card': 'Kartu Kredit',
+    'boleto': 'Boleto (Virtual)',
+    'voucher': 'Voucher',
+    'debit_card': 'Kartu Debit'
+    })
+    metode_pembayaran['Jumlah'] = metode_pembayaran['total_order'].apply(lambda x: f"{x:,}".replace(",", "."))
+    table_data = metode_pembayaran[['payment_type', 'Progress']].rename(
+        columns={'payment_type': 'Payment Type'}
+    )
 
-sns.barplot(y="product_category_name", x="review_score", data=product_worstreviews.head(5), palette=colors, ax=ax[1])
-ax[1].set_ylabel(None)
-ax[1].invert_xaxis()
-ax[1].set_xlabel("Score Review", fontsize=30)
-ax[1].yaxis.tick_right()
-ax[1].set_title("Worst Review Category Product", loc="center", fontsize=50)
-ax[1].tick_params(axis='y', labelsize=35)
-ax[1].tick_params(axis='x', labelsize=30)
+    st.markdown(
+    """
+    <style>
+    .stDataFrame {width: 100% !important;}
+    </style>
+    """,
+    unsafe_allow_html=True
+    )
+    
+    st.dataframe(table_data, hide_index=True, use_container_width=True)
+
+
+# VISUALIZE DATA
+# Tren Total Order Bulan/Year
+st.subheader("Tren Total Order")
+fig, ax = plt.subplots(figsize = (20,8))
+ax.plot(tren_monthly['order_month'], tren_monthly['total_delivered'], label = 'Delivered')
+ax.plot(tren_monthly['order_month'], tren_monthly['total_canceled'], label = 'Canceled')
+
+ax.set_title(None)
+ax.set_xlabel('Waktu (Bulan/Tahun)', fontsize = 12)
+ax.set_ylabel('Jumlah', fontsize=12)
+ax.legend()
+ax.set_xticks(range(0, len(tren_monthly['order_month']), 2))
+ax.tick_params(rotation=0)
 st.pyplot(fig)
 
-
-st.subheader("Category Product With High Order")
-fig, ax = plt.subplots(figsize = (20,10))
-colors = ["#90CAF9", "#D3D3D3", "#D3D3D3", "#D3D3D3", "#D3D3D3", "#D3D3D3", "#D3D3D3", "#D3D3D3", "#D3D3D3", "#D3D3D3"]
+# Tren Total Order Bulan/Year
+st.subheader("Top Kategori Produk Terlaris")
+product_best['product_category'] = (product_best['product_category']
+.str.replace('_', ' ')
+.str.title()
+)
+top_n = st.slider("Pilih jumlah kategori", 5, 30, 10, key='product_best')
+fig, ax = plt.subplots(figsize=(12, top_n * 0.5))
 sns.barplot(
-    x = 'order_id',
-    y = 'product_category_name',
-    data = product_highorder.head(10).sort_values(by = 'order_id', ascending=False),
-    palette = colors,
-    ax=ax
+data=product_best.head(top_n),
+x='total_order',
+y='product_category',
+palette='Blues_r',
+ax=ax
 )
 ax.set_title(None)
-ax.set_xlabel('Order', fontsize=30)
-ax.set_ylabel(None)
-ax.tick_params(axis='x', labelsize=20)
-ax.tick_params(axis='y', labelsize=20)
+ax.set_xlabel('Jumlah Pembelian', fontsize=12)
+ax.set_ylabel('')  
+
+# Tambahkan label pada bar dengan format ribuan dan efek stroke
+for container in ax.containers:
+    labels = [f"{int(v):,}".replace(",", ".") for v in container.datavalues]
+    for bar, label in zip(container.patches, labels):
+        ax.annotate(
+            label,
+            (bar.get_width() - (bar.get_width() * 0.02),  # sedikit geser ke kiri
+            bar.get_y() + bar.get_height() / 2),
+            ha='right', va='center',
+            color='white',
+            fontsize=11,
+            fontweight='bold',
+            path_effects=[pe.withStroke(linewidth=2, foreground='black')]
+        )
 st.pyplot(fig)
 
-st.subheader('Best Customer Based on RFM Parameters')
-col1, col2, col3 = st.columns(3)
+st.subheader("Delivery Time and Review Score")
+col1, col2 = st.columns([1,1])
+
 with col1:
-    avg_recency = round(rfm_df.recency.mean(), 1)
-    st.metric('Average Recency (Days)', value=avg_recency)
-with col2:
-    avg_frequency = round(rfm_df.frequency.mean(), 2)
-    st.metric('Average Frequency', value=avg_frequency)
-with col3:
-    avg_monetary = format_currency(rfm_df.monetary.mean(), "USD", locale='pt_BR')
-    st.metric("Average Monetary", value=avg_monetary)
+    st.markdown("<div style='text-align:center; font-weight:bold; font-size:20px;'>Early Delivery</div>", unsafe_allow_html=True)
+    cepat_antar['delivery_time'] = cepat_antar['delivery_time'].abs()
+    fig, ax = plt.subplots(figsize = (12,5))
+    ax.plot(cepat_antar['delivery_time'], cepat_antar['review_score'], color = 'green')
+    ax.set_title(None)
+    ax.set_xlabel('Hari')
+    ax.set_ylabel('Rata-Rata Review Score')
+    ax.tick_params(rotation=0)
+    ax.grid(True, linestyle='--', alpha=0.5)
+    ax.set_ylim(bottom=0)
+    ax.set_xlim(left=0)
+    plt.setp(ax.get_xticklabels(), rotation=0, ha="center")
+    st.pyplot(fig)
 
-fig, ax = plt.subplots(nrows=1, ncols=3, figsize=(35, 15))
-colors = ["#90CAF9", "#90CAF9", "#90CAF9", "#90CAF9", "#90CAF9"]
- 
-sns.barplot(y="recency", x="customer_id", data=rfm_df.sort_values(by="recency", ascending=True).head(5), palette=colors, ax=ax[0])
-ax[0].set_ylabel(None)
-ax[0].set_xlabel(None)
-ax[0].set_title("By Recency (days)", loc="center", fontsize=50)
-ax[0].tick_params(axis='y', labelsize=20)
-ax[0].tick_params(axis='x', labelsize=20, rotation=50)
- 
-sns.barplot(y="frequency", x="customer_id", data=rfm_df.sort_values(by="frequency", ascending=False).head(5), palette=colors, ax=ax[1])
-ax[1].set_ylabel(None)
-ax[1].set_xlabel("customer_id", fontsize=30)
-ax[1].set_title("By Frequency", loc="center", fontsize=50)
-ax[1].tick_params(axis='y', labelsize=20)
-ax[1].tick_params(axis='x', labelsize=20, rotation=50)
- 
-sns.barplot(y="monetary", x="customer_id", data=rfm_df.sort_values(by="monetary", ascending=False).head(5), palette=colors, ax=ax[2])
-ax[2].set_ylabel(None)
-ax[2].set_xlabel(None)
-ax[2].set_title("By Monetary", loc="center", fontsize=50)
-ax[2].tick_params(axis='y', labelsize=20)
-ax[2].tick_params(axis='x', labelsize=20, rotation=50)
- 
+with col2:
+    st.markdown("<div style='text-align:center; font-weight:bold; font-size:20px;'>Delay Delivery</div>", unsafe_allow_html=True)
+    fig, ax = plt.subplots(figsize = (12,5))
+    ax.plot(lambat_antar['delivery_time'], lambat_antar['review_score'], color='red')
+    ax.set_title(None)
+    ax.set_xlabel('Hari')
+    ax.set_ylabel('')
+    ax.set_ylim(bottom=0)
+    ax.set_xlim(left=0)
+    ax.grid(True, linestyle='--', alpha=0.5)
+    ax.tick_params(rotation=0)
+    st.pyplot(fig)
+
+st.subheader('Kategori Produk Profit Tertinggi')
+profit_product['product_category'] = (profit_product['product_category']
+.str.replace('_', ' ')
+.str.title()
+)
+top_n = st.slider("Pilih jumlah kategori", 5, 30, 10, key='profit_slider')
+fig, ax = plt.subplots(figsize=(12, top_n * 0.5))
+sns.barplot(
+data=profit_product.head(top_n),
+x='profit',
+y='product_category',
+hue='product_category', 
+palette='Blues_r',
+ax=ax
+)
+ax.set_title(None)
+ax.set_xlabel('Jumlah Pembelian', fontsize=12)
+ax.set_ylabel('')  
+
+# Tambahkan label pada bar dengan format ribuan dan efek stroke
+for container in ax.containers:
+    labels = [f"{int(v):,}".replace(",", ".") for v in container.datavalues]
+    for bar, label in zip(container.patches, labels):
+        ax.annotate(
+            label,
+            (bar.get_width() - (bar.get_width() * 0.02),  # sedikit geser ke kiri
+             bar.get_y() + bar.get_height() / 2),
+            ha='right', va='center',
+            color='white',
+            fontsize=11,
+            fontweight='bold',
+            path_effects=[pe.withStroke(linewidth=2, foreground='black')]
+        )
 st.pyplot(fig)
+
