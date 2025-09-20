@@ -3,7 +3,7 @@
 ## Setup Environment - Shell/Terminal
 
 ```
-cd C:/Users/Ricardo/Documents/My Project/IDCAMP-Data Science/Ujian Akhir Dicoding
+cd (directory file)
 pipenv install
 pip install shell
 pip install -r requirements.txt
@@ -14,3 +14,6 @@ pip install -r requirements.txt
 ```
 streamlit run dashboard.py
 ```
+
+# STREAMLIT
+[📌 Buka Aplikasi Streamlit](https://data-analyst-project---dicoding-ecjre575dkongnkv8vvsek.streamlit.app/)
